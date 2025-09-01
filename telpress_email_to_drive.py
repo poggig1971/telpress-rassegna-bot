@@ -293,7 +293,7 @@ def main():
             print("Dettaglio errori:")
             for e in errors:
                 print(" -", e)
-                return
+            return
 
     # Modalità SINGOLA DATA oppure ULTIMA RECENTE
     # Determina target_date e nome file
