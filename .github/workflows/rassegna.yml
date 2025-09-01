@@ -1,0 +1,33 @@
+nname: Rassegna Telpress
+
+on:
+  schedule:
+    - cron: "30 6 * * *"   # tutti i giorni alle 08:30 ora italiana (06:30 UTC)
+  workflow_dispatch:       # esecuzione manuale
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Telpress Bot
+        env:
+          SENDER_FILTER: ${{ secrets.SENDER_FILTER }}
+          SUBJECT_PREFIX: ${{ secrets.SUBJECT_PREFIX }}
+          DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
+          TIMEZONE: Europe/Rome
+          SERVICE_ACCOUNT_FILE: service_account.json
+        run: |
+          echo "${{ secrets.SERVICE_ACCOUNT_JSON }}" > service_account.json
+          echo "${{ secrets.CLIENT_SECRET_JSON }}" > client_secret.json
+          python telpress_email_to_drive.py --days 3
