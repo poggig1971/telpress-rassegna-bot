@@ -40,12 +40,22 @@ MONTHS_IT_INV = {v: k for k, v in MONTHS_IT.items()}
 
 # ----------------- Auth & Services -----------------
 def get_creds():
-    """OAuth utente (serve a Gmail; Drive lo useremo via SA)"""
+    """OAuth utente (serve a Gmail; in CI usa GOOGLE_TOKEN_JSON, in locale usa token_google.pkl/browser)."""
+    # 1) CI / Secrets: se presente GOOGLE_TOKEN_JSON, lo uso direttamente
+    token_json = os.getenv("GOOGLE_TOKEN_JSON")
+    if token_json:
+        import json
+        info = json.loads(token_json)
+        # NB: richiede anche il client_secret per poter fare il refresh
+        return Credentials.from_authorized_user_info(info, SCOPES)
+
+    # 2) Locale: come prima (pickle su disco)
     creds = None
     if os.path.exists(TOKEN_PATH):
         with open(TOKEN_PATH, "rb") as token:
             import pickle
             creds = pickle.load(token)
+
     if not creds or not creds.valid:
         if creds and getattr(creds, "expired", False) and getattr(creds, "refresh_token", None):
             from google.auth.transport.requests import Request
@@ -57,6 +67,7 @@ def get_creds():
             import pickle
             pickle.dump(creds, token)
     return creds
+
 
 def build_gmail_service(creds):
     return build("gmail", "v1", credentials=creds, cache_discovery=False)
