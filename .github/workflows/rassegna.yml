@@ -5,6 +5,9 @@ on:
     - cron: "*/15 * * * *"   # GitHub Actions usa UTC; lo script gestisce Europe/Rome
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: telpress-rassegna
   cancel-in-progress: true
@@ -12,6 +15,13 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
+
+    # Variabili comuni al job (non sensibili)
+    env:
+      PORTAL_URL: https://ancepiemonte.streamlit.app/
+      LOGO_PATH: logo-ance.png
+      NOTIFY_BCC_FILE: notify_bcc.txt
+
     steps:
       - uses: actions/checkout@v4
 
@@ -68,10 +78,8 @@ jobs:
           SMTP_SENDER_NAME:    "ANCe Piemonte News"
           # SMTP_REPLY_TO:     "comunicazioni@ancepiemonte.it"   # opzionale
 
-          # Destinatari / contenuto (metti in secret se vuoi)
-          NOTIFY_TO:           ${{ secrets.NOTIFY_TO }}
-          # NOTIFY_SUBJECT:    "Rassegna stampa {date_it} caricata"
-          # NOTIFY_BODY:       "Buongiorno,\n\nla rassegna del {date_it} è stata caricata.\nLink: {drive_link}\n\nCordiali saluti."
+          # Log minimal (no debug) per schedulata
+          DEBUG: "0"
         run: |
           printf '%s' "$SERVICE_ACCOUNT_JSON" > service_account.json
           printf '%s' "$CLIENT_SECRET_JSON"  > client_secret.json
@@ -97,13 +105,11 @@ jobs:
           SMTP_SECURE:         "ssl"
           SMTP_USER:           "news@ancepiemonte.it"
           SMTP_PASS:           ${{ secrets.SMTP_PASS }}
-          SMTP_SENDER_NAME:    "ANCe Piemonte News"
+          SMTP_SENDER_NAME:    "ANCE Piemonte Valle d'Aosta News"
           # SMTP_REPLY_TO:     "comunicazioni@ancepiemonte.it"   # opzionale
 
-          # Destinatari / contenuto
-          NOTIFY_TO:           ${{ secrets.NOTIFY_TO }}
-          # NOTIFY_SUBJECT:    "Rassegna stampa {date_it} caricata"
-          # NOTIFY_BODY:       "Buongiorno,\n\nla rassegna del {date_it} è stata caricata.\nLink: {drive_link}\n\nCordiali saluti."
+          # Debug attivo per run manuale
+          DEBUG: "1"
         run: |
           printf '%s' "$SERVICE_ACCOUNT_JSON" > service_account.json
           printf '%s' "$CLIENT_SECRET_JSON"  > client_secret.json
