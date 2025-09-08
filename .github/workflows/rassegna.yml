@@ -47,6 +47,7 @@ jobs:
 
       - name: Run Telpress Bot
         env:
+          # --- Lettura Telpress (restano invariati) ---
           SENDER_FILTER:       ${{ secrets.SENDER_FILTER }}
           SUBJECT_PREFIX:      ${{ secrets.SUBJECT_PREFIX }}
           DRIVE_FOLDER_ID:     ${{ secrets.DRIVE_FOLDER_ID }}
@@ -55,6 +56,24 @@ jobs:
           SERVICE_ACCOUNT_JSON: ${{ secrets.SERVICE_ACCOUNT_JSON }}
           CLIENT_SECRET_JSON:   ${{ secrets.CLIENT_SECRET_JSON }}
           GOOGLE_TOKEN_JSON:    ${{ secrets.GOOGLE_TOKEN_JSON }}
+
+          # --- SOLO invio notifica via Aruba (nuovi) ---
+          SMTP_HOST: smtps.aruba.it
+          SMTP_PORT: "465"
+          SMTP_SECURE: ssl
+          SMTP_USER: news@ancepiemonte.it
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          SMTP_SENDER_NAME: "ANCe Piemonte News"
+          # SMTP_REPLY_TO: comunicazioni@ancepiemonte.it   # opzionale
+
+          # Destinatari / contenuto (metti in secret se vuoi)
+          NOTIFY_TO: ${{ secrets.NOTIFY_TO }}              # oppure "lista@dominio.it,a@b.it"
+          # NOTIFY_SUBJECT: "Rassegna stampa {date_it} caricata"
+          # NOTIFY_BODY: |
+          #   Buongiorno,
+          #   la rassegna del {date_it} è stata caricata automaticamente
+          #   https://ancepiemonte.streamlit.app/
+          #   Cordiali saluti
         run: |
           printf '%s' "$SERVICE_ACCOUNT_JSON" > service_account.json
           printf '%s' "$CLIENT_SECRET_JSON"  > client_secret.json
