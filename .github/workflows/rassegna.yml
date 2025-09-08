@@ -2,7 +2,7 @@ name: Rassegna Telpress (08–12:59 ogni 15')
 
 on:
   schedule:
-    - cron: "*/15 * * * *"   # GitHub Actions usa UTC; lo script ha già il guard Europe/Rome
+    - cron: "*/15 * * * *"   # GitHub Actions usa UTC; lo script gestisce Europe/Rome
   workflow_dispatch:
 
 concurrency:
@@ -29,7 +29,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      # Guard orario extra (opzionale ma utile): 08:00–12:59 Europe/Rome per i run schedulati
+      # Guard orario: 08:00–12:59 Europe/Rome SOLO per i run schedulati
       - name: Time window guard (Europe/Rome 08:00–12:59)
         if: ${{ github.event_name == 'schedule' }}
         run: |
@@ -45,9 +45,11 @@ jobs:
           print("Dentro la finestra. Procedo.")
           PY
 
-      - name: Run Telpress Bot
+      # Esecuzione programmata (rispetta finestra oraria, log ridotti)
+      - name: Run Telpress Bot (scheduled)
+        if: ${{ github.event_name == 'schedule' }}
         env:
-          # --- Lettura Telpress (restano invariati) ---
+          # --- Lettura Telpress (invariati) ---
           SENDER_FILTER:       ${{ secrets.SENDER_FILTER }}
           SUBJECT_PREFIX:      ${{ secrets.SUBJECT_PREFIX }}
           DRIVE_FOLDER_ID:     ${{ secrets.DRIVE_FOLDER_ID }}
@@ -57,26 +59,52 @@ jobs:
           CLIENT_SECRET_JSON:   ${{ secrets.CLIENT_SECRET_JSON }}
           GOOGLE_TOKEN_JSON:    ${{ secrets.GOOGLE_TOKEN_JSON }}
 
-          # --- SOLO invio notifica via Aruba (nuovi) ---
-          SMTP_HOST: smtps.aruba.it
-          SMTP_PORT: "465"
-          SMTP_SECURE: ssl
-          SMTP_USER: news@ancepiemonte.it
-          SMTP_PASS: ${{ secrets.SMTP_PASS }}
-          SMTP_SENDER_NAME: "ANCe Piemonte News"
-          # SMTP_REPLY_TO: comunicazioni@ancepiemonte.it   # opzionale
+          # --- Notifica via SMTP (Aruba) ---
+          SMTP_HOST:           "smtps.aruba.it"
+          SMTP_PORT:           "465"
+          SMTP_SECURE:         "ssl"
+          SMTP_USER:           "news@ancepiemonte.it"
+          SMTP_PASS:           ${{ secrets.SMTP_PASS }}
+          SMTP_SENDER_NAME:    "ANCe Piemonte News"
+          # SMTP_REPLY_TO:     "comunicazioni@ancepiemonte.it"   # opzionale
 
           # Destinatari / contenuto (metti in secret se vuoi)
-          NOTIFY_TO: ${{ secrets.NOTIFY_TO }}              # oppure "lista@dominio.it,a@b.it"
-          # NOTIFY_SUBJECT: "Rassegna stampa {date_it} caricata"
-          # NOTIFY_BODY: |
-          #   Buongiorno,
-          #   la rassegna del {date_it} è stata caricata automaticamente
-          #   https://ancepiemonte.streamlit.app/
-          #   Cordiali saluti
+          NOTIFY_TO:           ${{ secrets.NOTIFY_TO }}
+          # NOTIFY_SUBJECT:    "Rassegna stampa {date_it} caricata"
+          # NOTIFY_BODY:       "Buongiorno,\n\nla rassegna del {date_it} è stata caricata.\nLink: {drive_link}\n\nCordiali saluti."
         run: |
           printf '%s' "$SERVICE_ACCOUNT_JSON" > service_account.json
           printf '%s' "$CLIENT_SECRET_JSON"  > client_secret.json
           python telpress_email_to_drive.py --quiet
 
+      # Esecuzione manuale (forza fuori orario, log estesi)
+      - name: Run Telpress Bot (manual, force)
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          # --- Lettura Telpress (invariati) ---
+          SENDER_FILTER:       ${{ secrets.SENDER_FILTER }}
+          SUBJECT_PREFIX:      ${{ secrets.SUBJECT_PREFIX }}
+          DRIVE_FOLDER_ID:     ${{ secrets.DRIVE_FOLDER_ID }}
+          TIMEZONE:            Europe/Rome
+          SERVICE_ACCOUNT_FILE: service_account.json
+          SERVICE_ACCOUNT_JSON: ${{ secrets.SERVICE_ACCOUNT_JSON }}
+          CLIENT_SECRET_JSON:   ${{ secrets.CLIENT_SECRET_JSON }}
+          GOOGLE_TOKEN_JSON:    ${{ secrets.GOOGLE_TOKEN_JSON }}
 
+          # --- Notifica via SMTP (Aruba) ---
+          SMTP_HOST:           "smtps.aruba.it"
+          SMTP_PORT:           "465"
+          SMTP_SECURE:         "ssl"
+          SMTP_USER:           "news@ancepiemonte.it"
+          SMTP_PASS:           ${{ secrets.SMTP_PASS }}
+          SMTP_SENDER_NAME:    "ANCe Piemonte News"
+          # SMTP_REPLY_TO:     "comunicazioni@ancepiemonte.it"   # opzionale
+
+          # Destinatari / contenuto
+          NOTIFY_TO:           ${{ secrets.NOTIFY_TO }}
+          # NOTIFY_SUBJECT:    "Rassegna stampa {date_it} caricata"
+          # NOTIFY_BODY:       "Buongiorno,\n\nla rassegna del {date_it} è stata caricata.\nLink: {drive_link}\n\nCordiali saluti."
+        run: |
+          printf '%s' "$SERVICE_ACCOUNT_JSON" > service_account.json
+          printf '%s' "$CLIENT_SECRET_JSON"  > client_secret.json
+          python telpress_email_to_drive.py --force-now
