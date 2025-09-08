@@ -18,6 +18,10 @@ from googleapiclient.errors import HttpError
 from google.oauth2.service_account import Credentials as SACredentials
 from requests.exceptions import RequestException
 
+# --- Email notify ---
+from email.message import EmailMessage
+from email.utils import formataddr
+
 # ---------------- Config ----------------
 load_dotenv()
 SENDER_FILTER = os.getenv("SENDER_FILTER", "rassegnastampa@telpress.it")
@@ -48,7 +52,7 @@ def log(msg, quiet=False):
 def within_window(now_local: datetime) -> bool:
     """Attivo 08:00–12:59."""
     return 8 <= now_local.hour <= 12
-    
+
 def with_retries(fn, *, tries=5, base_delay=0.8, max_delay=8.0, retriable_http=(429, 500, 502, 503, 504), quiet=False):
     for i in range(1, tries + 1):
         try:
@@ -185,11 +189,85 @@ def drive_upload_bytes(drive, content: bytes, name: str, folder_id: str, quiet=F
     metadata = {"name": name, "parents": [folder_id]}
     return with_retries(lambda: drive.files().create(body=metadata, media_body=media, fields="id,name").execute(), quiet=quiet)
 
+def drive_view_link(file_id: str) -> str:
+    # I destinatari devono avere permessi sulla cartella/file
+    return f"https://drive.google.com/file/d/{file_id}/view"
+
+# -------------- Notifica email --------------
+def _parse_recipients(raw: str):
+    if not raw:
+        return []
+    return [x.strip() for x in raw.replace(";", ",").split(",") if x.strip()]
+
+def _date_it_string(dt: datetime) -> str:
+    return f"{dt.day} {MONTHS_IT_INV[f'{dt.month:02d}']} {dt.year}"
+
+def send_notification_email(file_id: str, file_name: str, now_local: datetime, *, quiet=False):
+    """
+    Invia una mail via SMTP (Aruba/Gmail) con i seguenti ENV:
+      SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_SECURE (ssl|starttls)
+      NOTIFY_TO (lista separata da virgole o ;), opzionali:
+      NOTIFY_SUBJECT, NOTIFY_BODY, SMTP_SENDER_NAME, SMTP_REPLY_TO
+    """
+    recipients = _parse_recipients(os.getenv("NOTIFY_TO", ""))
+    if not recipients:
+        log("[INFO] NOTIFY_TO non configurato: salto invio email.", quiet)
+        return
+
+    smtp_host = os.getenv("SMTP_HOST", "smtps.aruba.it")
+    smtp_port = int(os.getenv("SMTP_PORT", "465"))
+    smtp_user = os.getenv("SMTP_USER")  # es. news@ancepiemonte.it
+    smtp_pass = os.getenv("SMTP_PASS")
+    smtp_secure = os.getenv("SMTP_SECURE", "ssl").lower()  # "ssl" (465) o "starttls" (587)
+    sender_name = os.getenv("SMTP_SENDER_NAME", "News")
+    reply_to = os.getenv("SMTP_REPLY_TO")
+
+    if not smtp_user or not smtp_pass:
+        log("[WARN] SMTP_USER/SMTP_PASS mancanti: impossibile inviare email.", quiet)
+        return
+
+    date_it = _date_it_string(now_local)
+    link = drive_view_link(file_id)
+
+    subject_tmpl = os.getenv("NOTIFY_SUBJECT", "Rassegna stampa {date_it} caricata")
+    body_tmpl = os.getenv(
+        "NOTIFY_BODY",
+        "Buongiorno,\n\nla rassegna stampa del {date_it} è stata caricata su Drive.\n"
+        "File: {file_name}\nLink: {drive_link}\n\nCordiali saluti."
+    )
+    subject = subject_tmpl.format(date_it=date_it, file_name=file_name, drive_link=link)
+    body = body_tmpl.format(date_it=date_it, file_name=file_name, drive_link=link)
+
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = formataddr((sender_name, smtp_user))
+    msg["To"] = ", ".join(recipients)
+    if reply_to:
+        msg["Reply-To"] = reply_to
+    msg.set_content(body)
+
+    try:
+        import smtplib
+        use_ssl = (smtp_secure == "ssl") or (smtp_port == 465)
+        if use_ssl:
+            with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=30) as s:
+                s.login(smtp_user, smtp_pass)
+                s.send_message(msg)
+        else:
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=30) as s:
+                s.starttls()
+                s.login(smtp_user, smtp_pass)
+                s.send_message(msg)
+
+        log(f"[OK] Notifica email inviata a: {', '.join(recipients)}", quiet)
+    except Exception as e:
+        log(f"[WARN] Invio email fallito: {e}", quiet)
+
 # -------------- Main --------------
 def main():
-    parser = argparse.ArgumentParser(description="Carica SOLO la rassegna odierna Telpress su Drive (no cancellazioni).")
+    parser = argparse.ArgumentParser(description="Carica SOLO la rassegna odierna Telpress su Drive e invia notifica email (no cancellazioni).")
     parser.add_argument("--quiet", action="store_true", help="Log minimo.")
-    parser.add_argument("--force-now", action="store_true", help="Ignora la finestra 08-12 (per test).")
+    parser.add_argument("--force-now", action="store_true", help="Ignora la finestra 08-12:59 (per test).")
     args = parser.parse_args()
 
     if not DRIVE_FOLDER_ID:
@@ -207,7 +285,7 @@ def main():
     drive = build_drive_service_as_service_account(quiet=args.quiet)
     existing = drive_find_file(drive, out_name, DRIVE_FOLDER_ID)
     if existing:
-        log(f"[INFO] {out_name} esiste già (id={existing['id']}). Nessun upload.", args.quiet)
+        log(f"[INFO] {out_name} esiste già (id={existing['id']}). Nessun upload, nessuna mail.", args.quiet)
         return
 
     # Gmail
@@ -240,8 +318,11 @@ def main():
         return
 
     up = drive_upload_bytes(drive, pdf_bytes, out_name, DRIVE_FOLDER_ID, quiet=args.quiet)
-    log(f"[OK] Caricato su Drive: {up.get('name')} (id={up.get('id')})", args.quiet)
+    file_id = up.get("id")
+    log(f"[OK] Caricato su Drive: {up.get('name')} (id={file_id})", args.quiet)
+
+    # Notifica email solo su upload riuscito
+    send_notification_email(file_id, out_name, now_local, quiet=args.quiet)
 
 if __name__ == "__main__":
     main()
-
