@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import os, re, io, json, argparse, time
+import os, re, io, json, argparse, time, mimetypes
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -20,7 +20,7 @@ from requests.exceptions import RequestException
 
 # --- Email notify ---
 from email.message import EmailMessage
-from email.utils import formataddr
+from email.utils import formataddr, make_msgid
 
 # ---------------- Config ----------------
 load_dotenv()
@@ -31,6 +31,12 @@ TIMEZONE = os.getenv("TIMEZONE", "Europe/Rome")
 SERVICE_ACCOUNT_FILE = os.getenv("SERVICE_ACCOUNT_FILE", "service_account.json")
 TOKEN_PATH = "token_google.pkl"
 CLIENT_SECRET = "client_secret.json"
+
+# Piattaforma + logo + lista BCC (file in repo)
+PORTAL_URL = os.getenv("PORTAL_URL", "https://ancepiemonte.streamlit.app/")
+LOGO_PATH = os.getenv("LOGO_PATH", "logo-ance.png")
+LOGO_URL  = os.getenv("LOGO_URL")  # opzionale, se vuoi link esterno
+BCC_FILE  = os.getenv("NOTIFY_BCC_FILE", "notify_bcc.txt")
 
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
@@ -129,11 +135,10 @@ def gmail_search_today(gmail, tz: str):
       Q1) from + subject:"<PREFIX>" + "<frase data>" + after/before
       Q2) from + "<frase data>" + after/before
       Q3) from + after/before (fallback: prende l'ultima di oggi)
-    Stampa in DEBUG le query e i subject trovati.
     """
     today = datetime.now(ZoneInfo(tz)).date()
     tomorrow = today + timedelta(days=1)
-    phrase = it_subject_date_phrase(today)  # es. "del 8 settembre 2025"
+    phrase = it_subject_date_phrase(today)
     after = today.strftime("%Y/%m/%d")
     before = tomorrow.strftime("%Y/%m/%d")
 
@@ -155,11 +160,9 @@ def gmail_search_today(gmail, tz: str):
         full_msgs = []
         for m in msgs:
             full = gmail.users().messages().get(userId="me", id=m["id"], format="full").execute()
-            subj = get_header(full, "Subject") or ""
-            dlog(f"[DEBUG] - Subject: {subj}")
             full_msgs.append(full)
 
-        # Filtra per frase data dentro il subject (case-insensitive)
+        # Filtra per frase data nel subject
         cand = [m for m in full_msgs if phrase.lower() in (get_header(m, "Subject") or "").lower()]
         if cand:
             latest = max(cand, key=lambda x: int(x.get("internalDate", "0")))
@@ -192,11 +195,9 @@ def get_html_body(message):
 
 def extract_pdf_link_from_html(html: str):
     soup = BeautifulSoup(html, "html.parser")
-    # prova prima un link con testo che contenga 'pdf'
     a = soup.find("a", string=lambda s: s and "pdf" in s.lower())
     if a and a.get("href"):
         return a["href"]
-    # altrimenti qualsiasi <a href="...pdf">
     for tag in soup.find_all("a", href=True):
         if ".pdf" in tag["href"].lower():
             return tag["href"]
@@ -237,24 +238,82 @@ def drive_view_link(file_id: str) -> str:
     return f"https://drive.google.com/file/d/{file_id}/view"
 
 # -------------- Notifica email --------------
-def _parse_recipients(raw: str):
-    if not raw:
-        return []
-    return [x.strip() for x in raw.replace(";", ",").split(",") if x.strip()]
-
 def _date_it_string(dt: datetime) -> str:
     return f"{dt.day} {MONTHS_IT_INV[f'{dt.month:02d}']} {dt.year}"
 
+def _read_bcc_list(path: str) -> list[str]:
+    """Legge notify_bcc.txt (righe, supporta virgole e ;)"""
+    addrs = []
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                # rimuovi commenti e spazi
+                line = re.sub(r"#.*$", "", line).strip()
+                if not line:
+                    continue
+                parts = re.split(r"[;,]", line)
+                addrs.extend([p.strip() for p in parts if p.strip()])
+    # fallback opzionali via env (se proprio servono)
+    addrs_env = os.getenv("NOTIFY_BCC", "")
+    if addrs_env:
+        addrs.extend([x.strip() for x in re.split(r"[;,]", addrs_env) if x.strip()])
+    # dedup preservando ordine
+    seen = set(); uniq = []
+    for a in addrs:
+        if a.lower() not in seen:
+            uniq.append(a); seen.add(a.lower())
+    return uniq
+
+def _build_bodies(date_it: str, portal_url: str, *, logo_cid: str | None, logo_url: str | None):
+    # Testo richiesto
+    txt = (
+        "Gentilissimi,\n"
+        "si comunica che la rassegna stampa di oggi è ora disponibile sulla piattaforma digitale ANCE Piemonte Valle d’Aosta.\n"
+        "Per consultarla, è sufficiente accedere con le proprie credenziali al seguente link:\n"
+        f"👉 {portal_url}\n"
+        "Oltre alla rassegna odierna, è possibile visualizzare anche le pubblicazioni precedenti, disponibili in archivio.\n"
+        "🔒 Si raccomanda di non condividere le credenziali di accesso con soggetti terzi e di mantenere riservata la propria password personale.\n"
+        "📌 Si informa che gli accessi alla piattaforma vengono conteggiati, nel rispetto degli obblighi previsti dai contratti di licenza per la riproduzione della rassegna stampa sottoscritti con i fornitori del servizio. "
+        "I dati di utilizzo vengono conservati ai fini di rendicontazione e verifica del numero di utilizzatori autorizzati.\n"
+        "Cordiali saluti,\n"
+        "ANCE Piemonte Valle D’Aosta\n"
+    )
+
+    # HTML con logo opzionale
+    logo_html = ""
+    if logo_cid:
+        logo_html = f'<p style="text-align:center;margin:0 0 16px 0;"><img src="cid:{logo_cid}" alt="ANCE Piemonte Valle d’Aosta" style="max-width:220px;height:auto;"></p>'
+    elif logo_url:
+        logo_html = f'<p style="text-align:center;margin:0 0 16px 0;"><img src="{logo_url}" alt="ANCE Piemonte Valle d’Aosta" style="max-width:220px;height:auto;"></p>'
+
+    html = f"""\
+<html>
+  <body style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,'Helvetica Neue',Arial,sans-serif;line-height:1.45;color:#111;">
+    {logo_html}
+    <p>Gentilissimi,</p>
+    <p>si comunica che la rassegna stampa di oggi è ora disponibile sulla piattaforma digitale <strong>ANCE Piemonte Valle d’Aosta</strong>.</p>
+    <p>Per consultarla, è sufficiente accedere con le proprie credenziali al seguente link:<br>
+       <a href="{portal_url}" target="_blank" rel="noopener">👉 {portal_url}</a>
+    </p>
+    <p>Oltre alla rassegna odierna, è possibile visualizzare anche le pubblicazioni precedenti, disponibili in archivio.</p>
+    <p>🔒 Si raccomanda di non condividere le credenziali di accesso con soggetti terzi e di mantenere riservata la propria password personale.</p>
+    <p>📌 Si informa che gli accessi alla piattaforma vengono conteggiati, nel rispetto degli obblighi previsti dai contratti di licenza per la riproduzione della rassegna stampa sottoscritti con i fornitori del servizio. 
+       I dati di utilizzo vengono conservati ai fini di rendicontazione e verifica del numero di utilizzatori autorizzati.</p>
+    <p>Cordiali saluti,<br>ANCE Piemonte Valle D’Aosta</p>
+  </body>
+</html>
+"""
+    return txt, html
+
 def send_notification_email(file_id: str, file_name: str, now_local: datetime, *, quiet=False):
     """
-    Invia una mail via SMTP (Aruba/Gmail) con i seguenti ENV:
-      SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_SECURE (ssl|starttls)
-      NOTIFY_TO (lista separata da virgole o ;), opzionali:
-      NOTIFY_SUBJECT, NOTIFY_BODY, SMTP_SENDER_NAME, SMTP_REPLY_TO
+    Invia una mail via SMTP (Aruba/Gmail). I destinatari sono letti da notify_bcc.txt (CCN).
+    ENV richieste: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_SECURE (ssl|starttls)
+    Opzionali: SMTP_SENDER_NAME, SMTP_REPLY_TO, PORTAL_URL, LOGO_PATH, LOGO_URL.
     """
-    recipients = _parse_recipients(os.getenv("NOTIFY_TO", ""))
-    if not recipients:
-        log("[INFO] NOTIFY_TO non configurato: salto invio email.", quiet)
+    bcc_list = _read_bcc_list(BCC_FILE)
+    if not bcc_list:
+        log("[INFO] Nessun destinatario in CCN (notify_bcc.txt vuoto o mancante). Salto invio email.", quiet, always=True)
         return
 
     smtp_host = os.getenv("SMTP_HOST", "smtps.aruba.it")
@@ -262,33 +321,64 @@ def send_notification_email(file_id: str, file_name: str, now_local: datetime, *
     smtp_user = os.getenv("SMTP_USER")  # es. news@ancepiemonte.it
     smtp_pass = os.getenv("SMTP_PASS")
     smtp_secure = os.getenv("SMTP_SECURE", "ssl").lower()  # "ssl" (465) o "starttls" (587)
-    sender_name = os.getenv("SMTP_SENDER_NAME", "News")
+    sender_name = os.getenv("SMTP_SENDER_NAME", "ANCE Piemonte News")
     reply_to = os.getenv("SMTP_REPLY_TO")
 
     if not smtp_user or not smtp_pass:
-        log("[WARN] SMTP_USER/SMTP_PASS mancanti: impossibile inviare email.", quiet)
+        log("[WARN] SMTP_USER/SMTP_PASS mancanti: impossibile inviare email.", quiet, always=True)
         return
 
     date_it = _date_it_string(now_local)
-    link = drive_view_link(file_id)
 
-    subject_tmpl = os.getenv("NOTIFY_SUBJECT", "Rassegna stampa {date_it} caricata")
-    body_tmpl = os.getenv(
-        "NOTIFY_BODY",
-        "Buongiorno,\n\nla rassegna stampa del {date_it} è stata caricata su Drive.\n"
-        "File: {file_name}\nLink: {drive_link}\n\nCordiali saluti."
-    )
-    subject = subject_tmpl.format(date_it=date_it, file_name=file_name, drive_link=link)
-    body = body_tmpl.format(date_it=date_it, file_name=file_name, drive_link=link)
+    # Subject personalizzabile, con default sensato
+    subject = os.getenv(
+        "NOTIFY_SUBJECT",
+        "Rassegna stampa {date_it} disponibile sulla piattaforma ANCE Piemonte VdA"
+    ).format(date_it=date_it)
 
+    # Prepara messaggio
     msg = EmailMessage()
     msg["Subject"] = subject
     msg["From"] = formataddr((sender_name, smtp_user))
-    msg["To"] = ", ".join(recipients)
+    msg["To"] = "Undisclosed recipients:;"
+    msg["Bcc"] = ", ".join(bcc_list)
     if reply_to:
         msg["Reply-To"] = reply_to
-    msg.set_content(body)
 
+    # Logo inline se presente
+    logo_cid = None
+    logo_data = None
+    if os.path.exists(LOGO_PATH):
+        try:
+            with open(LOGO_PATH, "rb") as f:
+                logo_data = f.read()
+            logo_cid = make_msgid(domain="ancepiemonte.it")[1:-1]  # senza <>
+            dlog(f"[DEBUG] Logo caricato da file {LOGO_PATH}, cid={logo_cid}")
+        except Exception as e:
+            log(f"[WARN] Impossibile leggere il logo '{LOGO_PATH}': {e}", quiet)
+
+    txt_body, html_body = _build_bodies(date_it, PORTAL_URL, logo_cid=logo_cid, logo_url=LOGO_URL)
+
+    # plain text + HTML
+    msg.set_content(txt_body)
+    msg.add_alternative(html_body, subtype="html")
+
+    # allega logo come related dell'HTML (se abbiamo i bytes)
+    if logo_data:
+        maintype, subtype = ("image", "png")
+        guessed = mimetypes.guess_type(LOGO_PATH)[0]
+        if guessed and "/" in guessed:
+            maintype, subtype = guessed.split("/", 1)
+        # il part HTML è payload[1]
+        msg.get_payload()[1].add_related(
+            logo_data,
+            maintype=maintype,
+            subtype=subtype,
+            cid=f"<{logo_cid}>",
+            filename=os.path.basename(LOGO_PATH),
+        )
+
+    # invio
     try:
         import smtplib
         use_ssl = (smtp_secure == "ssl") or (smtp_port == 465)
@@ -301,8 +391,8 @@ def send_notification_email(file_id: str, file_name: str, now_local: datetime, *
                 s.starttls()
                 s.login(smtp_user, smtp_pass)
                 s.send_message(msg)
-       
-        log(f"[OK] Notifica email inviata a: {', '.join(recipients)}", quiet, always=True)
+
+        log(f"[OK] Notifica email inviata a (CCN): {', '.join(bcc_list)}", quiet, always=True)
     except Exception as e:
         log(f"[WARN] Invio email fallito: {e}", quiet, always=True)
 
@@ -310,7 +400,7 @@ def send_notification_email(file_id: str, file_name: str, now_local: datetime, *
 def main():
     parser = argparse.ArgumentParser(description="Carica SOLO la rassegna odierna Telpress su Drive e invia notifica email (no cancellazioni).")
     parser.add_argument("--quiet", action="store_true", help="Log minimo.")
-    parser.add_argument("--force-now", action="store_true", help="Ignora la finestra 08-12:59 (per test).")
+    parser.add_argument("--force-now", action="store_true", help="Ignora la finestra 08–12:59 (per test).")
     args = parser.parse_args()
 
     if not DRIVE_FOLDER_ID:
@@ -318,7 +408,6 @@ def main():
 
     now_local = datetime.now(ZoneInfo(TIMEZONE))
     if not args.force_now and not within_window(now_local):
-        # visibile sempre, anche con --quiet
         print(f"[INFO] Fuori finestra oraria (ora locale {now_local:%H:%M}). Nessuna azione.")
         return
 
@@ -372,4 +461,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
