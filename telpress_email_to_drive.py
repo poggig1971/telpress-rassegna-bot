@@ -51,8 +51,8 @@ def dlog(msg: str):
         print(msg)
 
 # -------------- Utils --------------
-def log(msg, quiet=False):
-    if not quiet:
+def log(msg, quiet=False, always=False):
+    if always or not quiet:
         print(msg)
 
 def within_window(now_local: datetime) -> bool:
