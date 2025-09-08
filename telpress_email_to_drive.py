@@ -301,10 +301,10 @@ def send_notification_email(file_id: str, file_name: str, now_local: datetime, *
                 s.starttls()
                 s.login(smtp_user, smtp_pass)
                 s.send_message(msg)
-
-        log(f"[OK] Notifica email inviata a: {', '.join(recipients)}", quiet)
+       
+        log(f"[OK] Notifica email inviata a: {', '.join(recipients)}", quiet, always=True)
     except Exception as e:
-        log(f"[WARN] Invio email fallito: {e}", quiet)
+        log(f"[WARN] Invio email fallito: {e}", quiet, always=True)
 
 # -------------- Main --------------
 def main():
