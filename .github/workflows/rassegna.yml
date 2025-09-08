@@ -1,4 +1,4 @@
-name: Rassegna Telpress (08–12 ogni 15')
+name: Rassegna Telpress (08–12:59 ogni 15')
 
 on:
   schedule:
@@ -29,8 +29,8 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      # Guard orario extra (opzionale ma utile): 08:00–12:00 Europe/Rome per i run schedulati
-      - name: Time window guard (Europe/Rome 08:00–12:00)
+      # Guard orario extra (opzionale ma utile): 08:00–12:59 Europe/Rome per i run schedulati
+      - name: Time window guard (Europe/Rome 08:00–12:59)
         if: ${{ github.event_name == 'schedule' }}
         run: |
           python - <<'PY'
@@ -39,8 +39,8 @@ jobs:
           now = datetime.now(ZoneInfo("Europe/Rome"))
           hhmm = now.hour*100 + now.minute
           print(f"Ora locale: {now.strftime('%Y-%m-%d %H:%M')}")
-          if not (800 <= hhmm < 1200):
-              print("Fuori finestra (08:00–12:00). Esco senza fare nulla.")
+          if not (800 <= hhmm < 1300):
+              print("Fuori finestra (08:00–12:59). Esco senza fare nulla.")
               raise SystemExit(0)
           print("Dentro la finestra. Procedo.")
           PY
@@ -59,4 +59,5 @@ jobs:
           printf '%s' "$SERVICE_ACCOUNT_JSON" > service_account.json
           printf '%s' "$CLIENT_SECRET_JSON"  > client_secret.json
           python telpress_email_to_drive.py --quiet
+
 
