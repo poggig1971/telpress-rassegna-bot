@@ -59,7 +59,7 @@ jobs:
       - name: Run Telpress Bot (scheduled)
         if: ${{ github.event_name == 'schedule' }}
         env:
-          # --- Lettura Telpress (invariati) ---
+          # --- Lettura Telpress ---
           SENDER_FILTER:       ${{ secrets.SENDER_FILTER }}
           SUBJECT_PREFIX:      ${{ secrets.SUBJECT_PREFIX }}
           DRIVE_FOLDER_ID:     ${{ secrets.DRIVE_FOLDER_ID }}
@@ -69,13 +69,14 @@ jobs:
           CLIENT_SECRET_JSON:   ${{ secrets.CLIENT_SECRET_JSON }}
           GOOGLE_TOKEN_JSON:    ${{ secrets.GOOGLE_TOKEN_JSON }}
 
-          # --- Notifica via SMTP (Aruba) ---
+          # --- Notifica via SMTP (Aruba, SOLO SMTPS 465) ---
           SMTP_HOST:           "smtps.aruba.it"
           SMTP_PORT:           "465"
-          SMTP_SECURE:         "ssl"
+          SMTP_SECURE:         "smtps"   # trattato come SSL nel codice
+          SMTP_STRICT:         "1"       # nessun fallback verso 587/STARTTLS
           SMTP_USER:           "news@ancepiemonte.it"
           SMTP_PASS:           ${{ secrets.SMTP_PASS }}
-          SMTP_SENDER_NAME:    "ANCe Piemonte News"
+          SMTP_SENDER_NAME:    "ANCE Piemonte Valle d'Aosta News"
           # SMTP_REPLY_TO:     "comunicazioni@ancepiemonte.it"   # opzionale
 
           # Log minimal (no debug) per schedulata
@@ -89,7 +90,7 @@ jobs:
       - name: Run Telpress Bot (manual, force)
         if: ${{ github.event_name == 'workflow_dispatch' }}
         env:
-          # --- Lettura Telpress (invariati) ---
+          # --- Lettura Telpress ---
           SENDER_FILTER:       ${{ secrets.SENDER_FILTER }}
           SUBJECT_PREFIX:      ${{ secrets.SUBJECT_PREFIX }}
           DRIVE_FOLDER_ID:     ${{ secrets.DRIVE_FOLDER_ID }}
@@ -99,10 +100,11 @@ jobs:
           CLIENT_SECRET_JSON:   ${{ secrets.CLIENT_SECRET_JSON }}
           GOOGLE_TOKEN_JSON:    ${{ secrets.GOOGLE_TOKEN_JSON }}
 
-          # --- Notifica via SMTP (Aruba) ---
+          # --- Notifica via SMTP (Aruba, SOLO SMTPS 465) ---
           SMTP_HOST:           "smtps.aruba.it"
           SMTP_PORT:           "465"
-          SMTP_SECURE:         "ssl"
+          SMTP_SECURE:         "smtps"
+          SMTP_STRICT:         "1"
           SMTP_USER:           "news@ancepiemonte.it"
           SMTP_PASS:           ${{ secrets.SMTP_PASS }}
           SMTP_SENDER_NAME:    "ANCE Piemonte Valle d'Aosta News"
