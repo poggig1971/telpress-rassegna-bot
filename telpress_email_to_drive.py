@@ -44,6 +44,12 @@ MONTHS_IT = {
 }
 MONTHS_IT_INV = {v: k for k, v in MONTHS_IT.items()}
 
+# ---------------- Debug toggle ----------------
+DEBUG = os.getenv("DEBUG", "0").lower() in ("1", "true", "yes", "on")
+def dlog(msg: str):
+    if DEBUG:
+        print(msg)
+
 # -------------- Utils --------------
 def log(msg, quiet=False):
     if not quiet:
@@ -51,7 +57,7 @@ def log(msg, quiet=False):
 
 def within_window(now_local: datetime) -> bool:
     """Attivo 08:00–12:59."""
-    return 8 <= now_local.hour <= 12
+    return 8 <= now_local.hour < 13
 
 def with_retries(fn, *, tries=5, base_delay=0.8, max_delay=8.0, retriable_http=(429, 500, 502, 503, 504), quiet=False):
     for i in range(1, tries + 1):
@@ -111,26 +117,61 @@ def it_subject_date_phrase(d) -> str:
     month_it = MONTHS_IT_INV[f"{d.month:02d}"]
     return f"del {d.day} {month_it} {d.year}"
 
+def get_header(message, name: str):
+    for h in message.get("payload", {}).get("headers", []):
+        if h.get("name", "").lower() == name.lower():
+            return h.get("value")
+    return None
+
 def gmail_search_today(gmail, tz: str):
-    """Cerca SOLO la mail odierna usando la frase 'del {gg} {mese_it} {aaaa}' e i limiti di data."""
+    """
+    Cerca la rassegna odierna provando 3 query a scalare:
+      Q1) from + subject:"<PREFIX>" + "<frase data>" + after/before
+      Q2) from + "<frase data>" + after/before
+      Q3) from + after/before (fallback: prende l'ultima di oggi)
+    Stampa in DEBUG le query e i subject trovati.
+    """
     today = datetime.now(ZoneInfo(tz)).date()
     tomorrow = today + timedelta(days=1)
-    phrase = it_subject_date_phrase(today)
+    phrase = it_subject_date_phrase(today)  # es. "del 8 settembre 2025"
     after = today.strftime("%Y/%m/%d")
     before = tomorrow.strftime("%Y/%m/%d")
-    q = f'from:{SENDER_FILTER} subject:{SUBJECT_PREFIX!r} "{phrase}" after:{after} before:{before}'
-    res = gmail.users().messages().list(userId="me", q=q, maxResults=10).execute()
-    msgs = res.get("messages", [])
-    if not msgs:
-        return None
-    # prendi la più recente di oggi
-    latest, latest_ts = None, 0
-    for m in msgs:
-        full = gmail.users().messages().get(userId="me", id=m["id"], format="full").execute()
-        ts = int(full.get("internalDate", "0"))
-        if ts > latest_ts:
-            latest, latest_ts = full, ts
-    return latest
+
+    q_base = f'from:{SENDER_FILTER} after:{after} before:{before}'
+    queries = [
+        f'{q_base} subject:"{SUBJECT_PREFIX}" "{phrase}"',
+        f'{q_base} "{phrase}"',
+        q_base,
+    ]
+
+    for idx, q in enumerate(queries, 1):
+        dlog(f"[DEBUG] Gmail query {idx}: {q}")
+        res = gmail.users().messages().list(userId="me", q=q, maxResults=10).execute()
+        msgs = res.get("messages", [])
+        if not msgs:
+            dlog("[DEBUG] Nessun messaggio trovato con questa query.")
+            continue
+
+        full_msgs = []
+        for m in msgs:
+            full = gmail.users().messages().get(userId="me", id=m["id"], format="full").execute()
+            subj = get_header(full, "Subject") or ""
+            dlog(f"[DEBUG] - Subject: {subj}")
+            full_msgs.append(full)
+
+        # Filtra per frase data dentro il subject (case-insensitive)
+        cand = [m for m in full_msgs if phrase.lower() in (get_header(m, "Subject") or "").lower()]
+        if cand:
+            latest = max(cand, key=lambda x: int(x.get("internalDate", "0")))
+            return latest
+
+        # Ultimo fallback (Q3): prendi comunque il più recente della giornata
+        if idx == len(queries):
+            latest = max(full_msgs, key=lambda x: int(x.get("internalDate", "0")))
+            dlog("[DEBUG] Uso fallback: ultimo messaggio odierno del mittente.")
+            return latest
+
+    return None
 
 def parts_iter(payload):
     stack = [payload]
@@ -151,9 +192,11 @@ def get_html_body(message):
 
 def extract_pdf_link_from_html(html: str):
     soup = BeautifulSoup(html, "html.parser")
+    # prova prima un link con testo che contenga 'pdf'
     a = soup.find("a", string=lambda s: s and "pdf" in s.lower())
     if a and a.get("href"):
         return a["href"]
+    # altrimenti qualsiasi <a href="...pdf">
     for tag in soup.find_all("a", href=True):
         if ".pdf" in tag["href"].lower():
             return tag["href"]
@@ -275,7 +318,8 @@ def main():
 
     now_local = datetime.now(ZoneInfo(TIMEZONE))
     if not args.force_now and not within_window(now_local):
-        log(f"[INFO] Fuori finestra oraria (ora locale {now_local:%H:%M}). Nessuna azione.", args.quiet)
+        # visibile sempre, anche con --quiet
+        print(f"[INFO] Fuori finestra oraria (ora locale {now_local:%H:%M}). Nessuna azione.")
         return
 
     # Nome file odierno
@@ -304,6 +348,7 @@ def main():
 
     pdf_url = extract_pdf_link_from_html(html) if html else None
     if pdf_url:
+        dlog(f"[DEBUG] Link PDF trovato nell'HTML: {pdf_url}")
         log(f"[INFO] Link PDF: {pdf_url}", args.quiet)
         pdf_bytes = ensure_pdf_bytes(pdf_url, quiet=args.quiet)
 
@@ -311,6 +356,7 @@ def main():
         att = extract_pdf_attachment_bytes(gmail, msg)
         if att:
             att_name, pdf_bytes = att
+            dlog(f"[DEBUG] Allegato PDF: {att_name}, size={len(pdf_bytes)}")
             log(f"[INFO] Allegato PDF trovato: {att_name} ({len(pdf_bytes)} bytes)", args.quiet)
 
     if not pdf_bytes:
@@ -326,3 +372,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
