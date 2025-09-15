@@ -9,10 +9,10 @@ formedilpiemonte@ancepiemonte.it
 paola@malabailaearduino.it
 segreteria@cce.al.it
 uniat@ui.asti.it
-# ediliao@confindustria.aosta.it
-# info@ancebiella.it
-# edilizia@confindustriacuneo.it
-# segreteria@ancenovaravercelli.it
-# info@cce.to.it
-# ancesegreteria@uivco.vb.it
+ediliao@confindustria.aosta.it
+info@ancebiella.it
+edilizia@confindustriacuneo.it
+segreteria@ancenovaravercelli.it
+info@cce.to.it
+ancesegreteria@uivco.vb.it
 poggig@yahoo.com
