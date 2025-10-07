@@ -1,0 +1,15 @@
+name: Ping Streamlit App (keep alive)
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'  # Ogni 30 minuti (UTC)
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping https://ancepiemonte.streamlit.app/
+        run: |
+          echo "⏰ Ping in corso..."
+          curl -s -o /dev/null -w "%{http_code}\n" https://ancepiemonte.streamlit.app/
