@@ -408,8 +408,7 @@ def send_notification_email(file_id: str, file_name: str, now_local: datetime, *
         if idx < total:
             log(f"[PAUSE] Attesa di {DELAY_SECONDS}s prima del batch successivo...", always=True)
             sleep(DELAY_SECONDS)
-
-    log("🏁 Invio completato di tutti i batch.", always=True)
+    log(f"🏁 Invio completato. Totale destinatari: {len(bcc_list)} in {total} batch.", always=True)
 
 # -------------- Main --------------
 def main():
