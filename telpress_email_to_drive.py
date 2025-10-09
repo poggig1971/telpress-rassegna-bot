@@ -307,10 +307,11 @@ def _build_bodies(date_it: str, portal_url: str, *, logo_cid: str | None, logo_u
 
 def send_notification_email(file_id: str, file_name: str, now_local: datetime, *, quiet=False):
     """
-    Invia una mail via SMTP (Aruba/Gmail). I destinatari sono letti da notify_bcc.txt (CCN).
-    ENV richieste: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_SECURE (ssl|starttls)
-    Opzionali: SMTP_SENDER_NAME, SMTP_REPLY_TO, PORTAL_URL, LOGO_PATH, LOGO_URL.
+    Invia la notifica via SMTP Aruba in blocchi (batch) da 10 destinatari con retry automatico.
     """
+    import smtplib
+    from time import sleep
+
     bcc_list = _read_bcc_list(BCC_FILE)
     if not bcc_list:
         log("[INFO] Nessun destinatario in CCN (notify_bcc.txt vuoto o mancante). Salto invio email.", quiet, always=True)
@@ -318,9 +319,9 @@ def send_notification_email(file_id: str, file_name: str, now_local: datetime, *
 
     smtp_host = os.getenv("SMTP_HOST", "smtps.aruba.it")
     smtp_port = int(os.getenv("SMTP_PORT", "465"))
-    smtp_user = os.getenv("SMTP_USER")  # es. news@ancepiemonte.it
+    smtp_user = os.getenv("SMTP_USER")
     smtp_pass = os.getenv("SMTP_PASS")
-    smtp_secure = os.getenv("SMTP_SECURE", "ssl").lower()  # "ssl" (465) o "starttls" (587)
+    smtp_secure = os.getenv("SMTP_SECURE", "ssl").lower()
     sender_name = os.getenv("SMTP_SENDER_NAME", "ANCE Piemonte News")
     reply_to = os.getenv("SMTP_REPLY_TO")
 
@@ -329,72 +330,86 @@ def send_notification_email(file_id: str, file_name: str, now_local: datetime, *
         return
 
     date_it = _date_it_string(now_local)
-
-    # Subject personalizzabile, con default sensato
     subject = os.getenv(
         "NOTIFY_SUBJECT",
         "Rassegna stampa {date_it} disponibile sulla piattaforma ANCE Piemonte VdA"
     ).format(date_it=date_it)
 
-    # Prepara messaggio
-    msg = EmailMessage()
-    msg["Subject"] = subject
-    msg["From"] = formataddr((sender_name, smtp_user))
-    msg["To"] = "Undisclosed recipients:;"
-    msg["Bcc"] = ", ".join(bcc_list)
-    if reply_to:
-        msg["Reply-To"] = reply_to
-
-    # Logo inline se presente
-    logo_cid = None
-    logo_data = None
+    # Corpo messaggio
+    logo_cid, logo_data = None, None
     if os.path.exists(LOGO_PATH):
-        try:
-            with open(LOGO_PATH, "rb") as f:
-                logo_data = f.read()
-            logo_cid = make_msgid(domain="ancepiemonte.it")[1:-1]  # senza <>
-            dlog(f"[DEBUG] Logo caricato da file {LOGO_PATH}, cid={logo_cid}")
-        except Exception as e:
-            log(f"[WARN] Impossibile leggere il logo '{LOGO_PATH}': {e}", quiet)
+        with open(LOGO_PATH, "rb") as f:
+            logo_data = f.read()
+        logo_cid = make_msgid(domain="ancepiemonte.it")[1:-1]
+        dlog(f"[DEBUG] Logo caricato da file {LOGO_PATH}, cid={logo_cid}")
 
     txt_body, html_body = _build_bodies(date_it, PORTAL_URL, logo_cid=logo_cid, logo_url=LOGO_URL)
 
-    # plain text + HTML
-    msg.set_content(txt_body)
-    msg.add_alternative(html_body, subtype="html")
+    # ---- Impostazioni invio ----
+    BATCH_SIZE = 10
+    DELAY_SECONDS = 8
+    MAX_RETRIES = 3
 
-    # allega logo come related dell'HTML (se abbiamo i bytes)
-    if logo_data:
-        maintype, subtype = ("image", "png")
-        guessed = mimetypes.guess_type(LOGO_PATH)[0]
-        if guessed and "/" in guessed:
-            maintype, subtype = guessed.split("/", 1)
-        # il part HTML è payload[1]
-        msg.get_payload()[1].add_related(
-            logo_data,
-            maintype=maintype,
-            subtype=subtype,
-            cid=f"<{logo_cid}>",
-            filename=os.path.basename(LOGO_PATH),
-        )
+    # Suddividi la lista in blocchi
+    batches = [bcc_list[i:i + BATCH_SIZE] for i in range(0, len(bcc_list), BATCH_SIZE)]
+    total = len(batches)
+    log(f"[INFO] Invio email in {total} batch da {BATCH_SIZE} destinatari ciascuno", always=True)
 
-    # invio
-    try:
-        import smtplib
-        use_ssl = (smtp_secure == "ssl") or (smtp_port == 465)
-        if use_ssl:
-            with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=30) as s:
-                s.login(smtp_user, smtp_pass)
-                s.send_message(msg)
-        else:
-            with smtplib.SMTP(smtp_host, smtp_port, timeout=30) as s:
-                s.starttls()
-                s.login(smtp_user, smtp_pass)
-                s.send_message(msg)
+    for idx, batch in enumerate(batches, 1):
+        msg = EmailMessage()
+        msg["Subject"] = subject
+        msg["From"] = formataddr((sender_name, smtp_user))
+        msg["To"] = "Undisclosed recipients:;"
+        msg["Bcc"] = ", ".join(batch)
+        if reply_to:
+            msg["Reply-To"] = reply_to
 
-        log(f"[OK] Notifica email inviata a (CCN): {', '.join(bcc_list)}", quiet, always=True)
-    except Exception as e:
-        log(f"[WARN] Invio email fallito: {e}", quiet, always=True)
+        msg.set_content(txt_body)
+        msg.add_alternative(html_body, subtype="html")
+
+        # Logo inline se presente
+        if logo_data:
+            maintype, subtype = ("image", "png")
+            guessed = mimetypes.guess_type(LOGO_PATH)[0]
+            if guessed and "/" in guessed:
+                maintype, subtype = guessed.split("/", 1)
+            msg.get_payload()[1].add_related(
+                logo_data,
+                maintype=maintype,
+                subtype=subtype,
+                cid=f"<{logo_cid}>",
+                filename=os.path.basename(LOGO_PATH),
+            )
+
+        success = False
+        for attempt in range(1, MAX_RETRIES + 1):
+            try:
+                use_ssl = (smtp_secure == "ssl") or (smtp_port == 465)
+                if use_ssl:
+                    with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=40) as s:
+                        s.login(smtp_user, smtp_pass)
+                        s.send_message(msg)
+                else:
+                    with smtplib.SMTP(smtp_host, smtp_port, timeout=40) as s:
+                        s.starttls()
+                        s.login(smtp_user, smtp_pass)
+                        s.send_message(msg)
+
+                log(f"[OK] Email batch {idx}/{total} inviata a: {', '.join(batch)}", always=True)
+                success = True
+                break
+            except Exception as e:
+                log(f"[WARN] Tentativo {attempt}/{MAX_RETRIES} fallito per batch {idx}: {e}", always=True)
+                sleep(10)
+
+        if not success:
+            log(f"[ERROR] Invio fallito definitivamente per batch {idx}: {batch}", always=True)
+
+        if idx < total:
+            log(f"[PAUSE] Attesa di {DELAY_SECONDS}s prima del batch successivo...", always=True)
+            sleep(DELAY_SECONDS)
+
+    log("🏁 Invio completato di tutti i batch.", always=True)
 
 # -------------- Main --------------
 def main():
