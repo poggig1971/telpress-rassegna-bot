@@ -54,4 +54,15 @@ def send_email_batch(recipients, subject, body, attachment_path=None):
 
 # === ESECUZIONE ===
 if __name__ == "__main__":
-    all_recipients_
+    all_recipients = load_recipients(NOTIFY_BCC_FILE)
+    print(f"Totale destinatari trovati: {len(all_recipients)}")
+
+    for i in range(0, len(all_recipients), BATCH_SIZE):
+        batch = all_recipients[i : i + BATCH_SIZE]
+        print(f"Invio batch {i//BATCH_SIZE + 1}: {batch}")
+        send_email_batch(batch, EMAIL_SUBJECT, EMAIL_BODY, ATTACHMENT_PATH)
+        if i + BATCH_SIZE < len(all_recipients):
+            print(f"⏸ Attesa di {DELAY_SECONDS} secondi prima del prossimo batch...")
+            time.sleep(DELAY_SECONDS)
+
+    print("🏁 Invio completato.")
