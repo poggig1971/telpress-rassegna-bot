@@ -346,9 +346,12 @@ def send_notification_email(file_id: str, file_name: str, now_local: datetime, *
     txt_body, html_body = _build_bodies(date_it, PORTAL_URL, logo_cid=logo_cid, logo_url=LOGO_URL)
 
     # ---- Impostazioni invio ----
+    # ---- Impostazioni invio (ottimizzate per SMTP Aruba) ----
     BATCH_SIZE = 10
-    DELAY_SECONDS = 8
+    DELAY_SECONDS = 20     # più pausa tra i batch
     MAX_RETRIES = 3
+    RETRY_DELAY = 60       # pausa extra dopo errore di connessione
+    
 
     # Suddividi la lista in blocchi
     batches = [bcc_list[i:i + BATCH_SIZE] for i in range(0, len(bcc_list), BATCH_SIZE)]
@@ -382,15 +385,16 @@ def send_notification_email(file_id: str, file_name: str, now_local: datetime, *
             )
 
         success = False
+
         for attempt in range(1, MAX_RETRIES + 1):
             try:
                 use_ssl = (smtp_secure == "ssl") or (smtp_port == 465)
                 if use_ssl:
-                    with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=60) as s:
+                    with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=60) as s:  # timeout esteso
                         s.login(smtp_user, smtp_pass)
                         s.send_message(msg)
                 else:
-                    with smtplib.SMTP(smtp_host, smtp_port, timeout=40) as s:
+                    with smtplib.SMTP(smtp_host, smtp_port, timeout=60) as s:
                         s.starttls()
                         s.login(smtp_user, smtp_pass)
                         s.send_message(msg)
@@ -398,9 +402,15 @@ def send_notification_email(file_id: str, file_name: str, now_local: datetime, *
                 log(f"[OK] Email batch {idx}/{total} inviata a: {', '.join(batch)}", always=True)
                 success = True
                 break
+
             except Exception as e:
                 log(f"[WARN] Tentativo {attempt}/{MAX_RETRIES} fallito per batch {idx}: {e}", always=True)
-                sleep(10)
+                # Se errore di connessione, attende di più prima del prossimo tentativo
+                if "Connection unexpectedly closed" in str(e):
+                    log(f"[WAIT] Connessione chiusa da server, attendo {RETRY_DELAY}s prima di riprovare...", always=True)
+                    sleep(RETRY_DELAY)
+                else:
+                    sleep(10)
 
         if not success:
             log(f"[ERROR] Invio fallito definitivamente per batch {idx}: {batch}", always=True)
