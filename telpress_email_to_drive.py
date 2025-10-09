@@ -386,7 +386,7 @@ def send_notification_email(file_id: str, file_name: str, now_local: datetime, *
             try:
                 use_ssl = (smtp_secure == "ssl") or (smtp_port == 465)
                 if use_ssl:
-                    with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=40) as s:
+                    with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=60) as s:
                         s.login(smtp_user, smtp_pass)
                         s.send_message(msg)
                 else:
