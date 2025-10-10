@@ -10,8 +10,8 @@ EMAIL_SENDER = os.environ["SMTP_USER"]
 EMAIL_PASSWORD = os.environ["SMTP_PASS"]
 SMTP_SENDER_NAME = os.environ.get("SMTP_SENDER_NAME", "ANCE Piemonte")
 
-BATCH_SIZE = 10              # max 10 destinatari per blocco → compatibile con Aruba
-DELAY_SECONDS = 3            # pausa breve tra invii
+BATCH_SIZE = 1              # max 10 destinatari per blocco → compatibile con Aruba
+DELAY_SECONDS = 5            # pausa breve tre sec tra invii
 RETRY_COUNT = 3              # numero massimo di tentativi
 RETRY_DELAY = 10             # attesa tra retry se fallisce
 
