@@ -2,7 +2,7 @@ name: Rassegna Telpress (08–14:59 ogni 10')
 
 on:
   schedule:
-    - cron: "*/10 * * * *"   # GitHub Actions usa UTC; lo script gestisce Europe/Rome
+    - cron: "*/15 * * * *"   # GitHub Actions usa UTC; lo script gestisce Europe/Rome
   workflow_dispatch:
 
 permissions:
