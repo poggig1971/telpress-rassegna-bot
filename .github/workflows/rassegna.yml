@@ -39,8 +39,8 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      # Guard orario: 08:00–12:59 Europe/Rome SOLO per i run schedulati
-      - name: Time window guard (Europe/Rome 08:00–12:59)
+      # Guard orario: 08:00–18:59 Europe/Rome SOLO per i run schedulati
+      - name: Time window guard (Europe/Rome 08:00–18:59)
         if: ${{ github.event_name == 'schedule' }}
         run: |
           python - <<'PY'
