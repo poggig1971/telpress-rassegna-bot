@@ -13,7 +13,7 @@ SMTP_SENDER_NAME = os.environ.get("SMTP_SENDER_NAME", "ANCE Piemonte")
 BATCH_SIZE = 1              # max 10 destinatari per blocco → compatibile con Aruba
 DELAY_SECONDS = 5            # pausa breve tre sec tra invii
 RETRY_COUNT = 3              # numero massimo di tentativi
-RETRY_DELAY = 30             # attesa tra retry se fallisce
+RETRY_DELAY = 60             # attesa tra retry se fallisce
 
 NOTIFY_BCC_FILE = os.environ.get("NOTIFY_BCC_FILE", "notify_bcc.txt")
 ATTACHMENT_PATH = os.environ.get("ATTACHMENT_PATH", "rassegna.pdf")
