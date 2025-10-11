@@ -1,4 +1,4 @@
-name: Rassegna Telpress (08–18:59 ogni 10')
+name: Rassegna Telpress (08–14:59 ogni 10')
 
 on:
   schedule:
@@ -39,8 +39,8 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      # Guard orario: 08:00–18:59 Europe/Rome SOLO per i run schedulati
-      - name: Time window guard (Europe/Rome 08:00–18:59)
+      # Guard orario: 08:00–14:59 Europe/Rome SOLO per i run schedulati
+      - name: Time window guard (Europe/Rome 08:00–14:59)
         if: ${{ github.event_name == 'schedule' }}
         run: |
           python - <<'PY'
