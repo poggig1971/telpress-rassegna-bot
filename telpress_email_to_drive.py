@@ -347,7 +347,7 @@ def send_notification_email(file_id: str, file_name: str, now_local: datetime, *
 
     # ---- Impostazioni invio ----
     # ---- Impostazioni invio (ottimizzate per SMTP Aruba) ----
-    BATCH_SIZE = 10
+    BATCH_SIZE = 2
     DELAY_SECONDS = 20     # più pausa tra i batch
     MAX_RETRIES = 3
     RETRY_DELAY = 60       # pausa extra dopo errore di connessione
