@@ -62,7 +62,7 @@ def log(msg, quiet=False, always=False):
         print(msg)
 
 def within_window(now_local: datetime) -> bool:
-    """Attivo 08:00–12:59."""
+    """Attivo 08:00–15:59."""
     return 8 <= now_local.hour < 16
 
 def with_retries(fn, *, tries=5, base_delay=0.8, max_delay=8.0, retriable_http=(429, 500, 502, 503, 504), quiet=False):
