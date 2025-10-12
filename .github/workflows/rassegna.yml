@@ -49,8 +49,8 @@ jobs:
           now = datetime.now(ZoneInfo("Europe/Rome"))
           hhmm = now.hour*100 + now.minute
           print(f"Ora locale: {now.strftime('%Y-%m-%d %H:%M')}")
-          if not (800 <= hhmm < 1300):
-              print("Fuori finestra (08:00–12:59). Esco senza fare nulla.")
+          if not (800 <= hhmm < 1600):
+              print("Fuori finestra (08:00–15:59). Esco senza fare nulla.")
               raise SystemExit(0)
           print("Dentro la finestra. Procedo.")
           PY
