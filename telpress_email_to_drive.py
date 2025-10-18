@@ -292,7 +292,7 @@ def _build_bodies(date_it: str, portal_url: str, *, logo_cid: str | None, logo_u
     {logo_html}
     <p>Gentilissimi,</p>
     <p>si comunica che la rassegna stampa di oggi è ora disponibile sulla piattaforma digitale <strong>ANCE Piemonte Valle d’Aosta</strong>.</p>
-    <p>Per consultarla, è sufficiente accedere con le proprie credenziali al seguente link:<br>
+    <p>Per consultarla, è sufficiente accedere  utilizzando un browser diverso da Safari (ad esempio Google Chrome, Microsoft Edge o Firefox) con le proprie credenziali al seguente link:<br>
        <a href="{portal_url}" target="_blank" rel="noopener">👉 {portal_url}</a>
     </p>
     <p>Oltre alla rassegna odierna, è possibile visualizzare anche le pubblicazioni precedenti, disponibili in archivio.</p>
