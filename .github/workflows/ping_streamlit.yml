@@ -2,7 +2,7 @@ name: Ping Streamlit App (keep alive)
 
 on:
   schedule:
-    - cron: '*/30 * * * *'  # Ogni 30 minuti (UTC)
+    - cron: '*/20 * * * *'  # Ogni 30 minuti (UTC)
   workflow_dispatch:
 
 jobs:
