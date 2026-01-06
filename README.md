@@ -1,5 +1,5 @@
 # rassegna-automation
-automatizza il caricamento della rassegna stampa dalla mia email
+automatizza il caricamento della rassegna stampa dalla mia email gmail e invis con aziena
 python telpress_email_to_drive.py
 
 
