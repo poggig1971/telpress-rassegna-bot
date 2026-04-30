@@ -7,14 +7,12 @@ import requests
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 
-# Gmail OAuth (utente)
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.oauth2.credentials import Credentials
+# Google API client
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 from googleapiclient.errors import HttpError
 
-# Drive Service Account
+# Service Account (Drive diretto + Gmail con Domain-Wide Delegation)
 from google.oauth2.service_account import Credentials as SACredentials
 from requests.exceptions import RequestException
 
@@ -29,19 +27,15 @@ SUBJECT_PREFIX = os.getenv("SUBJECT_PREFIX", "Rassegna STAMPA")
 DRIVE_FOLDER_ID = os.getenv("DRIVE_FOLDER_ID")
 TIMEZONE = os.getenv("TIMEZONE", "Europe/Rome")
 SERVICE_ACCOUNT_FILE = os.getenv("SERVICE_ACCOUNT_FILE", "service_account.json")
-TOKEN_PATH = "token_google.pkl"
-CLIENT_SECRET = "client_secret.json"
+
+# Account Workspace di cui il Service Account legge la posta via DWD
+GMAIL_DELEGATED_USER = os.getenv("GMAIL_DELEGATED_USER", "direzione@ancepiemonte.it")
 
 # Piattaforma + logo + lista BCC (file in repo)
 PORTAL_URL = os.getenv("PORTAL_URL", "https://ancepiemonte.streamlit.app/")
 LOGO_PATH = os.getenv("LOGO_PATH", "logo-ance.png")
 LOGO_URL  = os.getenv("LOGO_URL")  # opzionale, se vuoi link esterno
 BCC_FILE  = os.getenv("NOTIFY_BCC_FILE", "notify_bcc.txt")
-
-SCOPES = [
-    "https://www.googleapis.com/auth/gmail.readonly",
-    "https://www.googleapis.com/auth/drive.file",
-]
 
 MONTHS_IT = {
     "gennaio": "01", "febbraio": "02", "marzo": "03", "aprile": "04",
@@ -84,37 +78,28 @@ def with_retries(fn, *, tries=5, base_delay=0.8, max_delay=8.0, retriable_http=(
             raise
 
 # -------------- Auth & Services --------------
-def get_creds():
-    """OAuth utente per Gmail (in CI può usare GOOGLE_TOKEN_JSON)."""
-    token_json = os.getenv("GOOGLE_TOKEN_JSON")
-    if token_json:
-        info = json.loads(token_json)
-        return Credentials.from_authorized_user_info(info, SCOPES)
-
-    creds = None
-    if os.path.exists(TOKEN_PATH):
-        with open(TOKEN_PATH, "rb") as token:
-            import pickle; creds = pickle.load(token)
-    if not creds or not creds.valid:
-        if creds and getattr(creds, "expired", False) and getattr(creds, "refresh_token", None):
-            from google.auth.transport.requests import Request
-            creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRET, SCOPES)
-            creds = flow.run_local_server(port=0, access_type="offline", prompt="consent")
-        with open(TOKEN_PATH, "wb") as token:
-            import pickle; pickle.dump(creds, token)
-    return creds
-
-def build_gmail_service(creds):
-    return build("gmail", "v1", credentials=creds, cache_discovery=False)
+def build_gmail_service(quiet=False):
+    """
+    Gmail via Service Account con Domain-Wide Delegation.
+    Il SA impersona l'utente Workspace indicato da GMAIL_DELEGATED_USER.
+    Richiede che il Client ID del SA sia autorizzato in Admin Console
+    (Sicurezza > Controlli API > Delega a livello di dominio) con scope
+    https://www.googleapis.com/auth/gmail.readonly.
+    """
+    sa_creds = SACredentials.from_service_account_file(
+        SERVICE_ACCOUNT_FILE,
+        scopes=["https://www.googleapis.com/auth/gmail.readonly"],
+        subject=GMAIL_DELEGATED_USER,
+    )
+    log(f"[INFO] Gmail: Service Account delegato a {GMAIL_DELEGATED_USER}", quiet)
+    return build("gmail", "v1", credentials=sa_creds, cache_discovery=False)
 
 def build_drive_service_as_service_account(quiet=False):
     sa_creds = SACredentials.from_service_account_file(
         SERVICE_ACCOUNT_FILE,
         scopes=["https://www.googleapis.com/auth/drive.file"],
     )
-    log(f"[INFO] Service Account: {sa_creds.service_account_email} — condividi la cartella {DRIVE_FOLDER_ID} con questo indirizzo.", quiet)
+    log(f"[INFO] Drive: Service Account {sa_creds.service_account_email} — la cartella {DRIVE_FOLDER_ID} deve essere condivisa con questo indirizzo.", quiet)
     return build("drive", "v3", credentials=sa_creds, cache_discovery=False)
 
 # -------------- Gmail helpers --------------
@@ -445,9 +430,8 @@ def main():
         log(f"[INFO] {out_name} esiste già (id={existing['id']}). Nessun upload, nessuna mail.", args.quiet)
         return
 
-    # Gmail
-    creds = get_creds()
-    gmail = build_gmail_service(creds)
+    # Gmail (Service Account con Domain-Wide Delegation)
+    gmail = build_gmail_service(quiet=args.quiet)
 
     # Cerca SOLO la mail di oggi
     msg = gmail_search_today(gmail, TIMEZONE)
@@ -485,3 +469,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
