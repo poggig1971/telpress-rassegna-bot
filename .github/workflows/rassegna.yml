@@ -20,6 +20,7 @@ jobs:
       PORTAL_URL: https://ancepiemonte.streamlit.app/
       LOGO_PATH: logo-ance.png
       NOTIFY_BCC_FILE: notify_bcc.txt
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
     steps:
       - uses: actions/checkout@v4
