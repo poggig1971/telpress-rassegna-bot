@@ -2,7 +2,9 @@ name: Rassegna Telpress (08–14:59 ogni 20')
 
 on:
   schedule:
-    - cron: "*/20 * * * *"   # GitHub Actions usa UTC; lo script gestisce Europe/Rome
+    # Cron in UTC. 6-13 UTC copre 08-14:59 ora italiana sia in CET (UTC+1) sia in CEST (UTC+2).
+    # Minuti 7,27,47 invece di */20 per evitare i picchi di carico GitHub a :00,:20,:40.
+    - cron: "7,27,47 6-13 * * *"
   workflow_dispatch:
 
 permissions:
@@ -10,58 +12,52 @@ permissions:
 
 concurrency:
   group: telpress-rassegna
-  cancel-in-progress: true
+  cancel-in-progress: false   # FIX: evita di tagliare run a metà
 
 jobs:
   run:
     runs-on: ubuntu-latest
-
     env:
       PORTAL_URL: https://ancepiemonte.streamlit.app/
       LOGO_PATH: logo-ance.png
       NOTIFY_BCC_FILE: notify_bcc.txt
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
       - uses: actions/cache@v4
         with:
           path: ~/.cache/pip
           key: pip-${{ runner.os }}-${{ hashFiles('**/requirements.txt') }}
           restore-keys: |
             pip-${{ runner.os }}-
-
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      # ⏰ Guardia oraria 08:00–14:59 (Europe/Rome)
+      # ⏰ Guardia oraria 08:00–14:59 (Europe/Rome) — VERA, con output GitHub
       - name: Time window guard (Europe/Rome 08:00–14:59)
+        id: guard
         if: ${{ github.event_name == 'schedule' }}
-        continue-on-error: false
         run: |
           python - <<'PY'
+          import os
           from datetime import datetime
           from zoneinfo import ZoneInfo
-          import sys
           now = datetime.now(ZoneInfo("Europe/Rome"))
-          hhmm = now.hour*100 + now.minute
-          print(f"Ora locale: {now.strftime('%Y-%m-%d %H:%M')}")
-          if not (800 <= hhmm < 1600):
-              print("Fuori finestra (08:00–15:59). Esco senza fare nulla.")
-              sys.exit(0)
-          print("Dentro la finestra. Procedo.")
+          hhmm = now.hour * 100 + now.minute
+          in_window = 800 <= hhmm < 1500   # 08:00–14:59 incluso
+          print(f"Ora locale: {now.strftime('%Y-%m-%d %H:%M %Z')} → in_window={in_window}")
+          # Scrive output GitHub leggibile dagli step successivi
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"in_window={'true' if in_window else 'false'}\n")
           PY
 
-      # 🕗 Esecuzione automatica (schedulata)
+      # 🕗 Esecuzione automatica (schedulata) — SOLO se il guard ha detto sì
       - name: Run Telpress Bot (scheduled)
-        if: ${{ github.event_name == 'schedule' }}
+        if: ${{ github.event_name == 'schedule' && steps.guard.outputs.in_window == 'true' }}
         env:
-          # --- Lettura Telpress (Service Account + Domain-Wide Delegation) ---
           SENDER_FILTER:        ${{ secrets.SENDER_FILTER }}
           SUBJECT_PREFIX:       ${{ secrets.SUBJECT_PREFIX }}
           DRIVE_FOLDER_ID:      ${{ secrets.DRIVE_FOLDER_ID }}
@@ -69,8 +65,6 @@ jobs:
           SERVICE_ACCOUNT_FILE: service_account.json
           SERVICE_ACCOUNT_JSON: ${{ secrets.SERVICE_ACCOUNT_JSON }}
           GMAIL_DELEGATED_USER: "direzione@ancepiemonte.it"
-
-          # --- Notifica via SMTP (Google Workspace, SMTPS 465) ---
           SMTP_HOST:           "smtp.gmail.com"
           SMTP_PORT:           "465"
           SMTP_SECURE:         "ssl"
@@ -78,14 +72,12 @@ jobs:
           SMTP_USER:           "info@ancepiemonte.it"
           SMTP_PASS:           ${{ secrets.SMTP_PASS }}
           SMTP_SENDER_NAME:    "ANCE Piemonte Valle d'Aosta"
-
-          # Log minimal per schedulata
           DEBUG: "0"
         run: |
           printf '%s' "$SERVICE_ACCOUNT_JSON" > service_account.json
           python telpress_email_to_drive.py --quiet
 
-      # 🚀 Esecuzione manuale (forza fuori orario, log estesi)
+      # 🚀 Esecuzione manuale (force, log estesi)
       - name: Run Telpress Bot (manual, force)
         if: ${{ github.event_name == 'workflow_dispatch' }}
         env:
