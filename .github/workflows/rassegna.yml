@@ -1,10 +1,10 @@
-name: Rassegna Telpress (08–14:59 ogni 20')
+name: Rassegna Telpress (HOT 09-11 / TAIL 11-13:30)
 
 on:
   schedule:
-    # Cron in UTC. 6-13 UTC copre 08-14:59 ora italiana sia in CET (UTC+1) sia in CEST (UTC+2).
-    # Minuti 7,27,47 invece di */20 per evitare i picchi di carico GitHub a :00,:20,:40.
-    - cron: "7,27,47 6-13 * * *"
+    # Range UTC 07-12 copre 09-14 italiana in CEST e 08-13 italiana in CET.
+    # Il guard interno applica la logica fine basata sull'ora italiana reale.
+    - cron: "*/15 7-12 * * *"
   workflow_dispatch:
 
 permissions:
@@ -12,7 +12,7 @@ permissions:
 
 concurrency:
   group: telpress-rassegna
-  cancel-in-progress: false   # FIX: evita di tagliare run a metà
+  cancel-in-progress: false
 
 jobs:
   run:
@@ -36,8 +36,10 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      # ⏰ Guardia oraria 08:00–14:59 (Europe/Rome) — VERA, con output GitHub
-      - name: Time window guard (Europe/Rome 08:00–14:59)
+      # ⏰ Guard a densità variabile (Europe/Rome)
+      #   HOT  09:00-10:59 → esegui sempre (ogni 15')
+      #   TAIL 11:00-13:29 → esegui solo nei quartetti :00-:14 e :30-:44 (ogni 30')
+      - name: Time window guard (HOT/TAIL)
         id: guard
         if: ${{ github.event_name == 'schedule' }}
         run: |
@@ -45,18 +47,34 @@ jobs:
           import os
           from datetime import datetime
           from zoneinfo import ZoneInfo
+
           now = datetime.now(ZoneInfo("Europe/Rome"))
           hhmm = now.hour * 100 + now.minute
-          in_window = 800 <= hhmm < 1500   # 08:00–14:59 incluso
-          print(f"Ora locale: {now.strftime('%Y-%m-%d %H:%M %Z')} → in_window={in_window}")
-          # Scrive output GitHub leggibile dagli step successivi
+          quartet = now.minute // 15   # 0=:00-:14, 1=:15-:29, 2=:30-:44, 3=:45-:59
+
+          in_hot  = 900  <= hhmm < 1100
+          in_tail = 1100 <= hhmm < 1330 and quartet in (0, 2)
+          should_run = in_hot or in_tail
+
+          if in_hot:
+              label = "HOT (every 15')"
+          elif 1100 <= hhmm < 1330:
+              label = "TAIL slot" if in_tail else "TAIL skip (off-slot)"
+          else:
+              label = "OUTSIDE window"
+
+          print(f"Ora locale: {now.strftime('%Y-%m-%d %H:%M %Z')}")
+          print(f"Classificazione: {label}")
+          print(f"Should run: {should_run}")
+
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-              f.write(f"in_window={'true' if in_window else 'false'}\n")
+              f.write(f"should_run={'true' if should_run else 'false'}\n")
+              f.write(f"label={label}\n")
           PY
 
-      # 🕗 Esecuzione automatica (schedulata) — SOLO se il guard ha detto sì
+      # 🕗 Esecuzione automatica (schedulata)
       - name: Run Telpress Bot (scheduled)
-        if: ${{ github.event_name == 'schedule' && steps.guard.outputs.in_window == 'true' }}
+        if: ${{ github.event_name == 'schedule' && steps.guard.outputs.should_run == 'true' }}
         env:
           SENDER_FILTER:        ${{ secrets.SENDER_FILTER }}
           SUBJECT_PREFIX:       ${{ secrets.SUBJECT_PREFIX }}
