@@ -1,4 +1,4 @@
-name: Rassegna Telpress (10-13, ogni 30')
+name: Rassegna Telpress (10-13, ogni 30 min)
 
 on:
   schedule:
