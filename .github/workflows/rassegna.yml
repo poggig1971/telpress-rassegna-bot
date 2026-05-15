@@ -1,10 +1,11 @@
-name: Rassegna Telpress (HOT 09-11 / TAIL 11-13:30)
+name: Rassegna Telpress (10-13, ogni 30')
 
 on:
   schedule:
-    # Range UTC 07-12 copre 09-14 italiana in CEST e 08-13 italiana in CET.
+    # Range UTC 8-12 copre 10-14 CEST e 9-13 CET.
+    # Minuti 7/37 = anti-peak (evita :00/:15/:30/:45, i picchi di carico GitHub).
     # Il guard interno applica la logica fine basata sull'ora italiana reale.
-    - cron: "*/15 7-12 * * *"
+    - cron: "7,37 8-12 * * *"
   workflow_dispatch:
 
 permissions:
@@ -36,10 +37,10 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      # ⏰ Guard a densità variabile (Europe/Rome)
-      #   HOT  09:00-10:59 → esegui sempre (ogni 15')
-      #   TAIL 11:00-13:29 → esegui solo nei quartetti :00-:14 e :30-:44 (ogni 30')
-      - name: Time window guard (HOT/TAIL)
+      # ⏰ Guard finestra 10:00-13:00 (Europe/Rome), ogni 30 minuti
+      #   Slot attesi: 10:00, 10:30, 11:00, 11:30, 12:00, 12:30, 13:00
+      #   Il cron emette a :07 e :37 → quartet 0 e quartet 2
+      - name: Time window guard (10:00-13:00, every 30')
         id: guard
         if: ${{ github.event_name == 'schedule' }}
         run: |
@@ -49,18 +50,20 @@ jobs:
           from zoneinfo import ZoneInfo
 
           now = datetime.now(ZoneInfo("Europe/Rome"))
-          hhmm = now.hour * 100 + now.minute
+          hour = now.hour
           quartet = now.minute // 15   # 0=:00-:14, 1=:15-:29, 2=:30-:44, 3=:45-:59
 
-          in_hot  = 900  <= hhmm < 1100
-          in_tail = 1100 <= hhmm < 1330 and quartet in (0, 2)
-          should_run = in_hot or in_tail
+          slot_full = quartet == 0     # slot "tondo" XX:00
+          slot_half = quartet == 2     # slot "mezz'ora" XX:30
 
-          if in_hot:
-              label = "HOT (every 15')"
-          elif 1100 <= hhmm < 1330:
-              label = "TAIL slot" if in_tail else "TAIL skip (off-slot)"
+          if 10 <= hour <= 12 and (slot_full or slot_half):
+              should_run = True
+              label = f"RUN slot {hour:02d}:{'00' if slot_full else '30'}"
+          elif hour == 13 and slot_full:
+              should_run = True
+              label = "RUN slot 13:00 (closing)"
           else:
+              should_run = False
               label = "OUTSIDE window"
 
           print(f"Ora locale: {now.strftime('%Y-%m-%d %H:%M %Z')}")
