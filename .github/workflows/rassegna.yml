@@ -5,7 +5,7 @@ on:
     # Range UTC 8-12 copre 10-14 CEST e 9-13 CET.
     # Minuti 7/37 = anti-peak (evita :00/:15/:30/:45, i picchi di carico GitHub).
     # Il guard interno applica la logica fine basata sull'ora italiana reale.
-    - cron: "*/5 6-13 * * *""
+    - cron: "2,7,12,17,22,27,32,37,42,47,52,57 8-12 * * *"
   workflow_dispatch:
 
 permissions:
